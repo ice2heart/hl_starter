@@ -10,12 +10,15 @@
 #include <QMenu>
 #include <QCloseEvent>
 #include <QApplication>
+#include <QRegExp>
 
 #include <QPushButton>
 #include <QMessageBox>
 #include <QDesktopServices>
 
 #include <QDebug>
+
+#include "package.h"
 
 MainWindow::MainWindow(QSettings *settings, QWidget *parent) :
     QMainWindow(parent),
@@ -24,6 +27,7 @@ MainWindow::MainWindow(QSettings *settings, QWidget *parent) :
     trayIcon(new QSystemTrayIcon(this))
 {
     ui->setupUi(this);
+    curent_package = nullptr;
     trayIcon->setIcon(this->style()->standardIcon(QStyle::SP_ComputerIcon));
     trayIcon->setToolTip(tr("Game launcher"));
     QMenu * menu = new QMenu(this);
@@ -51,7 +55,8 @@ MainWindow::MainWindow(QSettings *settings, QWidget *parent) :
     redrawDirectory();
     ui->mainPages->setCurrentIndex(0);
     ui->autoHomeCheckBox->setChecked(autoopen);
-    ui->argsLineEdit->setText(m_settings->value(SETTINGS_USER_ARGS, "").toString());
+//    ui->argsLineEdit->setText(m_settings->value(SETTINGS_USER_ARGS, "").toString());
+    mod_args = m_settings->value(SETTINGS_USER_ARGS).toMap();
     connect(ui->AddFolderButton, SIGNAL(clicked()), this, SLOT(addFolder()));
     connect(ui->RemoveFolderButton, SIGNAL(clicked()), this, SLOT(removeFolder()));
     connect(ui->home_selection, &QPushButton::clicked, this, &MainWindow::selectedHomeFolder);
@@ -61,7 +66,15 @@ MainWindow::MainWindow(QSettings *settings, QWidget *parent) :
         m_settings->setValue(SETTINGS_NICK, text);
     });
     connect(ui->argsLineEdit, &QLineEdit::textChanged, [=](const QString &text){
-        m_settings->setValue(SETTINGS_USER_ARGS, text);
+        if (!curent_package) {
+            QMessageBox msgBox;
+            msgBox.setIcon(QMessageBox::Warning);
+            msgBox.setText(tr("Please, select mode before"));
+            msgBox.exec();
+            return;
+        }
+        mod_args[curent_package->m_package->name] = ui->argsLineEdit->text();
+        m_settings->setValue(SETTINGS_USER_ARGS, mod_args);
     });
     connect(ui->autoHomeCheckBox, &QCheckBox::clicked, [=](bool checked) {
         m_settings->setValue(SETTINGS_AUTOSELECT, checked);
@@ -71,6 +84,15 @@ MainWindow::MainWindow(QSettings *settings, QWidget *parent) :
     });
     connect(ui->backSettingsPushButton, &QPushButton::clicked, [=](){
         ui->mainPages->setCurrentIndex(1);
+    });
+    connect(ui->openGameFolderButton, &QPushButton::clicked, [=](){
+       QDesktopServices::openUrl(QUrl::fromLocalFile(homeDirecotry));
+    });
+    connect(ui->listAvalible, &QListWidget::itemClicked, [=](QListWidgetItem* item){
+      curent_package = static_cast<PackageItem*>(ui->listAvalible->itemWidget(item));
+      if (!curent_package)
+          return;
+      ui->argsLineEdit->setText(mod_args[curent_package->m_package->name].toString());
     });
     updateRemotePackageList();
     QString last_home = m_settings->value(SETTINGS_LAST_HOME, "").toString();
@@ -110,8 +132,24 @@ void MainWindow::updateInstalledPackages()
         filtred << gameinfo.filter("liblist.gam") << gameinfo.filter("gameinfo.json");
         if (filtred.isEmpty())
             continue;
-        qDebug() << filtred<<modDir;
+//        qDebug() << filtred<<modDir;
         PackagePtr p(new Package);
+        if (filtred.contains("liblist.gam")){
+            QFile file(QDir(home.filePath(modDir)).filePath("liblist.gam"));
+            if (!file.open(QIODevice::ReadOnly)) {
+                fprintf(stderr, "Could not open for reading: %s\n",
+                        qPrintable(file.errorString()));
+            }
+            else {
+                QString list(file.readAll());
+                file.close();
+                QRegExp rx("^game\\s+\\\"([^\\\"]+)\\\"");
+                if (rx.indexIn(list) != -1){
+                    p->liblist = rx.cap(1);
+                    qDebug()<<p->liblist;
+                }
+            }
+        }
         p->name = modDir;
         p->isLocal = true;
         if (modDir == "valve"){
@@ -540,112 +578,6 @@ void DownloadManager::downloadFinished(QNetworkReply *reply)
     reply->deleteLater();
 }
 
-PackageItem::PackageItem(QWidget *parent, DownloadManager *dm, PackagePtr p)
-    :QWidget(parent)
-    ,m_dm(dm)
-    ,m_package(p)
-{
-    downLoadButton.setText(tr("Download"));
-    playButton.setText(tr("Play"));
-    deleteButton.setText(tr("Delete"));
-    progress.setVisible(false);
-    layout.addWidget(&label);
-    layout.addWidget(&progress);
-    layout.addWidget(&downLoadButton);
-    layout.addWidget(&playButton);
-    layout.addWidget(&deleteButton);
-    setLayout(&layout);
-    update();
-    mv = reinterpret_cast<MainWindow*>(parent);
-    connect(m_package.data(), &Package::updated, this, &PackageItem::update);
-    connect(m_package.data(), &Package::cleaned, this, &PackageItem::clean);
-    connect(&playButton, &QPushButton::clicked, [=](){
-        mv->launchPackage(m_package->name);
-    });
-    connect(&deleteButton, &QPushButton::clicked, [=]() {
-        QMessageBox::StandardButton reply;
-        reply = QMessageBox::question(this, "Delete directory", tr("Are you sure to delete?"),
-                                      QMessageBox::Yes|QMessageBox::No);
-        if (reply == QMessageBox::No) {
-            return;
-        }
-        QDir dir(mv->homeDirecotry);
-        dir.cd(m_package->name);
-        dir.removeRecursively();
-        m_package->isLocal = false;
-        update();
-        mv->updateInstalledPackages();
-    });
-    connect(&downLoadButton, &QPushButton::clicked, this, &PackageItem::download);
-    connect(m_package.data(), &Package::doDownload, this, &PackageItem::download);
-}
-
-void PackageItem::download()
-{
-    if (m_package->isLocal){
-        emit m_package->downloaded();
-        return;
-    }
-    progress.setVisible(true);
-    curentDownload = m_dm->doDownload(m_package->href);
-    connect(curentDownload.data(), &DownloadActions::fileFineshed, [=](const QString &filename) {
-        progress.setVisible(false);
-        QDir().rename(filename, QDir(mv->homeDirecotry).filePath(filename));
-        //rename to p.name+zip
-        //7za.exe x filename
-        //move to homedir
-        const QString program = "7za.exe";
-        const QStringList arguments = QStringList() << "x" << filename;
-        QProcess *process = new QProcess;
-
-        process->setWorkingDirectory(mv->homeDirecotry);
-        process->start(program, arguments);
-        connect(process, static_cast<void(QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
-                [=](int, QProcess::ExitStatus){
-            mv->updateInstalledPackages();
-            process->deleteLater();
-            QDir(mv->homeDirecotry).remove(filename);
-            emit m_package->downloaded();
-        });
-        curentDownload.reset();
-    });
-    connect(curentDownload.data(), &DownloadActions::progress, [=](int progressVal) {
-        progress.setValue(progressVal);
-    });
-}
-
-void PackageItem::update()
-{
-    label.setText(m_package->name);
-    if (!m_package->isLocal) {
-        label.setStyleSheet("QLabel { color : grey; }");
-        playButton.hide();
-        deleteButton.hide();
-        downLoadButton.show();
-        progress.setValue(0);
-    } else {
-        label.setStyleSheet("QLabel { color : black; }");
-        progress.hide();
-        downLoadButton.hide();
-        playButton.show();
-        deleteButton.show();
-    }
-}
-
-void PackageItem::clean()
-{
-    if (!curentDownload.isNull()) {
-        qDebug()<<"canceling download";
-        curentDownload->cancel();
-        curentDownload.reset();
-    }
-    m_package.clear();
-}
-
-Package::~Package()
-{
-    emit cleaned();
-}
 
 NewsWidget::NewsWidget(QWidget *parent, const News &news)
     :QWidget (parent)

@@ -14,6 +14,10 @@
 
 #include <QListWidgetItem>
 
+class Package;
+typedef QSharedPointer<Package> PackagePtr;
+class PackageItem;
+
 namespace Ui {
 class MainWindow;
 }
@@ -28,25 +32,7 @@ static const QString SETTINGS_USER_ARGS = "User_args";
 static const QString SETTINGS_START_HIDDEN = "Start_Hidden";
 static const QString SETTINGS_STEAM_SELECTOR = "Steam_selector";
 
-class Package: public QObject
-{
-    Q_OBJECT
-public:
-    Package() = default;
-    ~Package();
-    QString name;
-    QUrl href;
-    QString version;
-    bool isLocal;
-    QString args;
-    QString startArgs;
-signals:
-    void updated();
-    void cleaned();
-    void downloaded();
-    void doDownload();
-};
-typedef QSharedPointer<Package> PackagePtr;
+
 
 class DownloadActions: public QObject
 {
@@ -88,27 +74,7 @@ public slots:
 
 class MainWindow;
 
-class PackageItem: public QWidget
-{
-    Q_OBJECT
-    DownloadManager *m_dm;
-    PackagePtr m_package;
 
-    QHBoxLayout layout;
-    QLabel label;
-    QPushButton downLoadButton;
-    QPushButton playButton;
-    QPushButton deleteButton;
-    QProgressBar progress;
-    DownloadActionsPtr curentDownload;
-    MainWindow *mv;
-public:
-    PackageItem(QWidget *parent, DownloadManager *dm, PackagePtr p);
-public slots:
-    void update();
-    void clean();
-    void download();
-};
 
 struct News
 {
@@ -168,6 +134,8 @@ private:
     QMap<QString, PackagePtr> packages;
     QMap<QString, QVariant> folders;
     QMap<QString, QVariant> steam_versions;
+    QMap<QString, QVariant> mod_args;
+    PackageItem *curent_package;
     NewsList news;
 
     void packagesIsLoaded();
