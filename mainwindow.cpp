@@ -326,7 +326,32 @@ void MainWindow::showNotify(const QString &header, const QString &text)
 void MainWindow::update_app(const QString &url)
 {
     qDebug()<<url;
-    exit(0);
+    DownloadActionsPtr update = m_manager.doDownload(QUrl(url));
+    connect(update.data(), &DownloadActions::fileFineshed, [=]( const QString &filename){
+
+        QDir().rename(filename, QDir(qApp->applicationDirPath()).filePath(filename));
+        //rename to p.name+zip
+        //7za.exe x filename
+        //move to homedir
+        const QString program = "7za.exe";
+        const QStringList arguments = QStringList() << "x" << filename;
+        QProcess *process = new QProcess;
+
+        process->setWorkingDirectory(qApp->applicationDirPath());
+        process->start(program, arguments);
+        connect(process, static_cast<void(QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
+                [=](int, QProcess::ExitStatus){
+            process->deleteLater();
+            QDir(qApp->applicationDirPath()).remove(filename);
+//            qApp->exit();
+        });
+
+    }
+    );
+    connect(update.data(), &DownloadActions::progress, [=](int progressVal) {
+        ui->updatingProgressBar->setValue(progressVal);
+    });
+
 
 }
 
