@@ -1,6 +1,5 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
-#include <QJsonDocument>
 #include <QFileDialog>
 #include <QInputDialog>
 #include <QListWidgetItem>
@@ -55,7 +54,6 @@ MainWindow::MainWindow(QSettings *settings, QWidget *parent) :
     redrawDirectory();
     ui->mainPages->setCurrentIndex(0);
     ui->autoHomeCheckBox->setChecked(autoopen);
-//    ui->argsLineEdit->setText(m_settings->value(SETTINGS_USER_ARGS, "").toString());
     mod_args = m_settings->value(SETTINGS_USER_ARGS).toMap();
     connect(ui->AddFolderButton, SIGNAL(clicked()), this, SLOT(addFolder()));
     connect(ui->RemoveFolderButton, SIGNAL(clicked()), this, SLOT(removeFolder()));
@@ -73,7 +71,7 @@ MainWindow::MainWindow(QSettings *settings, QWidget *parent) :
             msgBox.exec();
             return;
         }
-        mod_args[curent_package->m_package->name] = ui->argsLineEdit->text();
+        mod_args[curent_package->m_package->name] = text;
         m_settings->setValue(SETTINGS_USER_ARGS, mod_args);
     });
     connect(ui->autoHomeCheckBox, &QCheckBox::clicked, [=](bool checked) {
@@ -242,11 +240,6 @@ void MainWindow::selectHome(const QString &home)
     profile_name = home;
     ui->profileLable->setText(home);
     homeDirecotry = folders[home].toString();
-//    QDir home_d(this->homeDirecotry);
-//    QStringList topFiles = home_d.entryList( QDir::Files|QDir::NoDotAndDotDot);
-//    if (topFiles.contains("steam_api.dll", Qt::CaseInsensitive)){
-//        qDebug()<<"steam version";
-//    }
     updateInstalledPackages();
     packagesIsLoaded();
 }
@@ -330,6 +323,13 @@ void MainWindow::showNotify(const QString &header, const QString &text)
 
 }
 
+void MainWindow::update_app(const QString &url)
+{
+    qDebug()<<url;
+    exit(0);
+
+}
+
 void MainWindow::closeEvent(QCloseEvent *event)
 {
     if(this->isVisible()){
@@ -395,6 +395,12 @@ void MainWindow::updateRemotePackageList()
     DownloadActionsPtr r = m_manager.doDownloadJSON(QUrl("https://ice2heart.com/packagelist.json"));
     connect(r.data(), &DownloadActions::jsonFineshed, [=]( const QJsonDocument &jdoc){
         QJsonObject main = jdoc.object();
+        QJsonObject version = main["version"].toObject();
+        if (version["num"].toString() != VERSION){
+            ui->mainPages->setCurrentIndex(3);
+            this->update_app(version["href"].toString());
+            return;
+        }
         QJsonArray jpackages = main["list"].toArray();
         QJsonArray jnews = main["news"].toArray();
         for (auto jpackage : jpackages) {
@@ -429,154 +435,6 @@ void MainWindow::updateRemotePackageList()
     });
 }
 
-DownloadManager::DownloadManager()
-{
-    connect(&manager, SIGNAL(finished(QNetworkReply*)),
-            SLOT(downloadFinished(QNetworkReply*)));
-}
-
-DownloadActionsPtr DownloadManager::doDownloadJSON(const QUrl &url)
-{
-    return doDownload(url, JSON);
-}
-
-DownloadActionsPtr DownloadManager::doDownload(const QUrl &url, int type, DownloadActionsPtr responce)
-{
-    QUrl realUrl(url);
-    if (realUrl.toString().startsWith("https://yadi.sk/")){
-        realUrl = QUrl(QString("https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key=%1").arg(url.toString()));
-        type = YDISK;
-    }
-    QNetworkRequest request(realUrl);
-    QNetworkReply *reply = manager.get(request);
-
-    connect(reply, &QNetworkReply::downloadProgress, this, &DownloadManager::emitProgress);
-    connect(responce.data(), &DownloadActions::cancel, reply, &QNetworkReply::abort);
-    this->type.insert(reply, type);
-
-    actions.insert(reply, responce);
-#if QT_CONFIG(ssl)
-    connect(reply, SIGNAL(sslErrors(QList<QSslError>)),
-            SLOT(sslErrors(QList<QSslError>)));
-#endif
-
-    currentDownloads.append(reply);
-    return responce;
-}
-
-QString DownloadManager::saveFileName(const QUrl &url)
-{
-    QString path = url.path();
-    QString basename = QFileInfo(path).fileName();
-
-    if (basename.isEmpty())
-        basename = "download";
-
-    if (QFile::exists(basename)) {
-        // already exists, don't overwrite
-        int i = 0;
-        basename += '.';
-        while (QFile::exists(basename + QString::number(i)))
-            ++i;
-
-        basename += QString::number(i);
-    }
-
-    return basename;
-}
-
-bool DownloadManager::saveToDisk(const QString &filename, QIODevice *data)
-{
-    QFile file(filename);
-    if (!file.open(QIODevice::WriteOnly)) {
-        fprintf(stderr, "Could not open %s for writing: %s\n",
-                qPrintable(filename),
-                qPrintable(file.errorString()));
-        return false;
-    }
-
-    file.write(data->readAll());
-    file.close();
-
-    return true;
-}
-
-bool DownloadManager::isHttpRedirect(QNetworkReply *reply)
-{
-    int statusCode = reply->attribute(QNetworkRequest::HttpStatusCodeAttribute).toInt();
-    return statusCode == 301 || statusCode == 302 || statusCode == 303
-            || statusCode == 305 || statusCode == 307 || statusCode == 308;
-}
-
-QString DownloadManager::getHref(QIODevice *data)
-{
-    QByteArray raw = data->readAll();
-    QJsonDocument jdocument = QJsonDocument::fromJson(raw);
-    QJsonObject jobj = jdocument.object();
-    QString href = jobj["href"].toString();
-    qDebug()<<href;
-    return href;
-
-}
-
-void DownloadManager::sslErrors(const QList<QSslError> &sslErrors)
-{
-#if QT_CONFIG(ssl)
-    for (const QSslError &error : sslErrors)
-        fprintf(stderr, "SSL error: %s\n", qPrintable(error.errorString()));
-#else
-    Q_UNUSED(sslErrors);
-#endif
-}
-
-void DownloadManager::emitProgress(qint64 bytesReceived, qint64 bytesTotal)
-{
-    if (bytesTotal == -1 || !bytesTotal)
-        return;
-    qint16 progress = int(((double(bytesReceived)/double(bytesTotal)) * 100));
-    DownloadActionsPtr p = actions[reinterpret_cast<QNetworkReply*>(sender())];
-    if (!p.isNull()) {
-        p->progress(progress);
-    }
-}
-
-void DownloadManager::downloadFinished(QNetworkReply *reply)
-{
-
-    QUrl url = reply->url();
-    if (reply->error()) {
-        fprintf(stderr, "Download of %s failed: %s\n",
-                url.toEncoded().constData(),
-                qPrintable(reply->errorString()));
-    } else {
-        if (isHttpRedirect(reply)) {
-            qDebug()<<"Request was redirected.";
-            doDownload(QUrl(reply->rawHeader("Location")), BINFILE, actions[reply]);
-        } else {
-            if (type[reply] == YDISK) {
-                QString href = getHref(reply);
-                doDownload(QUrl(href), BINFILE, actions[reply]);
-            }
-            else if (type[reply] == JSON) {
-                QByteArray raw = reply->readAll();
-                QJsonDocument jdocument = QJsonDocument::fromJson(raw);
-                actions[reply]->jsonFineshed(jdocument);
-            }
-            else if (type[reply] == BINFILE) {
-                QString filename = saveFileName(url);
-                if (saveToDisk(filename, reply)) {
-                    actions[reply]->fileFineshed(filename);
-                    printf("Download of %s succeeded (saved to %s)\n",
-                           url.toEncoded().constData(), qPrintable(filename));
-                }
-            }
-
-        }
-    }
-    actions.remove(reply);
-    currentDownloads.removeAll(reply);
-    reply->deleteLater();
-}
 
 
 NewsWidget::NewsWidget(QWidget *parent, const News &news)
@@ -600,7 +458,7 @@ NewsWidget::NewsWidget(QWidget *parent, const News &news)
         QDateTime now = QDateTime::currentDateTime();
         qint64 diff = news.date.toMSecsSinceEpoch() - now.toMSecsSinceEpoch();
         if (diff > 0) {
-            event.setInterval((int)diff);
+            event.setInterval(static_cast<int>(diff));
             event.setSingleShot(true);
             event.start();
             connect(&event, &QTimer::timeout, [=](){
