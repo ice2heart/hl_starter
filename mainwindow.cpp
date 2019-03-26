@@ -328,22 +328,33 @@ void MainWindow::update_app(const QString &url)
     qDebug()<<url;
     DownloadActionsPtr update = m_manager.doDownload(QUrl(url));
     connect(update.data(), &DownloadActions::fileFineshed, [=]( const QString &filename){
-
-        QDir().rename(filename, QDir(qApp->applicationDirPath()).filePath(filename));
+        QDir appDir(qApp->applicationDirPath());
+        QString dirname = appDir.dirName();
+        appDir.cdUp();
+        qDebug()<<appDir<<dirname<<filename;
+        appDir.rename(dirname, dirname+"bkp");
+        appDir.mkdir(dirname);
+        QDir newDir(appDir);
+        newDir.cd(dirname);
+        appDir.rename(filename, newDir.filePath("app.zip"));
         //rename to p.name+zip
         //7za.exe x filename
         //move to homedir
         const QString program = "7za.exe";
-        const QStringList arguments = QStringList() << "x" << filename;
+        const QStringList arguments = QStringList() << "x" << "app.zip";
         QProcess *process = new QProcess;
 
-        process->setWorkingDirectory(qApp->applicationDirPath());
+        process->setWorkingDirectory(newDir.path());
         process->start(program, arguments);
         connect(process, static_cast<void(QProcess::*)(int, QProcess::ExitStatus)>(&QProcess::finished),
                 [=](int, QProcess::ExitStatus){
             process->deleteLater();
-            QDir(qApp->applicationDirPath()).remove(filename);
-//            qApp->exit();
+            QDir(newDir).remove("app.zip");
+//            QDir old(appDir.filePath(dirname+"bkp2"));
+//            qDebug()<<old;
+//            old.removeRecursively();
+            QProcess::startDetached(newDir.filePath(qApp->applicationName()));
+            qApp->exit();
         });
 
     }

@@ -1,5 +1,6 @@
 #include "download.h"
 #include <QFileInfo>
+#include <QDir>
 #include <QJsonObject>
 
 DownloadManager::DownloadManager()
@@ -136,7 +137,8 @@ void DownloadManager::downloadFinished(QNetworkReply *reply)
                 actions[reply]->jsonFineshed(jdocument);
             }
             else if (type[reply] == BINFILE) {
-                QString filename = saveFileName(url);
+
+                QString filename = QDir(QDir::tempPath()).filePath( saveFileName(url));
                 if (saveToDisk(filename, reply)) {
                     actions[reply]->fileFineshed(filename);
                     printf("Download of %s succeeded (saved to %s)\n",
