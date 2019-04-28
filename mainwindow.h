@@ -91,6 +91,7 @@ private:
     QSystemTrayIcon *trayIcon;
     DownloadManager m_manager;
     QString profile_name;
+    QString packagelist;
 
     QMap<QString, PackagePtr> packages;
     QMap<QString, QVariant> folders;

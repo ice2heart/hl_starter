@@ -14,6 +14,7 @@
 #include <QPushButton>
 #include <QMessageBox>
 #include <QDesktopServices>
+#include <QSettings>
 
 #include <QDebug>
 
@@ -25,6 +26,11 @@ MainWindow::MainWindow(QSettings *settings, QWidget *parent) :
     ui(new Ui::MainWindow),
     trayIcon(new QSystemTrayIcon(this))
 {
+    QDir appDir(qApp->applicationDirPath());
+    QSettings packageSettings(appDir.filePath("url_path.ini"), QSettings::IniFormat);
+    packageSettings.beginGroup("/PackageList");
+    packagelist = packageSettings.value("url", "https://ice2heart.com/packagelist.json").toString();
+
     ui->setupUi(this);
     curent_package = nullptr;
     trayIcon->setIcon(this->style()->standardIcon(QStyle::SP_ComputerIcon));
@@ -428,7 +434,7 @@ void MainWindow::updateNewsList()
 
 void MainWindow::updateRemotePackageList()
 {
-    DownloadActionsPtr r = m_manager.doDownloadJSON(QUrl("https://ice2heart.com/packagelist.json"));
+    DownloadActionsPtr r = m_manager.doDownloadJSON(QUrl(this->packagelist));
     connect(r.data(), &DownloadActions::jsonFineshed, [=]( const QJsonDocument &jdoc){
         QJsonObject main = jdoc.object();
         QJsonObject version = main["version"].toObject();
